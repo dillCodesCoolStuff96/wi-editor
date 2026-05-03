@@ -13,19 +13,37 @@ type Step = {
   id: string;
   title: string;
   blocks: Block[];
-
-  // future-proof metadata (important for manufacturing use case)
-  meta?: {
-    stepNumber?: number;
-    durationMinutes?: number;
-    role?: string;
-  };
 };
 
 type Operation = {
   id: string;
   name: string;
   steps: Step[];
+};
+
+/* -------------------------
+   HELPERS
+------------------------- */
+const createStep = (): Step => ({
+  id: crypto.randomUUID(),
+  title: "New Step",
+  blocks: []
+});
+
+const createBlock = (type: Block["type"]): Block => {
+  if (type === "text") {
+    return {
+      id: crypto.randomUUID(),
+      type: "text",
+      content: ""
+    };
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    type: "tldraw",
+    snapshot: undefined
+  };
 };
 
 /* -------------------------
@@ -53,30 +71,22 @@ const initialData: Operation = {
   ]
 };
 
-/* -------------------------
-   TITLE
-------------------------- */
-function PageTitle({
-  value,
-  onChange
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+/*
+Wrapper
+*/
+
+function BlockWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+    <div
       style={{
-        fontSize: 20,
-        fontWeight: "bold",
-        width: "100%",
-        padding: 6,
-        marginBottom: 10,
-        border: "1px solid #ccc",
-        borderRadius: 4
+        border: "1px solid #eee",
+        padding: 10,
+        marginBottom: 12,
+        borderRadius: 6
       }}
-    />
+    >
+      {children}
+    </div>
   );
 }
 
@@ -106,7 +116,6 @@ function TextBlock({
 
 /* -------------------------
    TLDRAW BLOCK
-   (FIXED VERSION)
 ------------------------- */
 function TldrawBlock({
   snapshot,
@@ -115,47 +124,57 @@ function TldrawBlock({
   snapshot?: any;
   onChange: (snapshot: any) => void;
 }) {
-  // ✅ FIX #1: persistent editor reference (NOT global, NOT local var)
   const editorRef = useRef<any>(null);
 
   return (
-    <div style={{ height: 400, border: "1px solid #ccc" }}>
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      height: 460, // important: locks layout
+      border: "1px solid #ccc",
+      borderRadius: 6,
+      overflow: "hidden"
+    }}
+  >
+    {/* CANVAS AREA */}
+    <div style={{ flex: 1, minHeight: 0 }}>
       <Tldraw
         onMount={(editor) => {
-          // store editor instance safely
           editorRef.current = editor;
 
-          // load saved snapshot
           if (snapshot) {
             loadSnapshot(editor.store, snapshot);
           }
         }}
       />
+    </div>
 
-      {/* -------------------------
-         SAVE DRAWING BUTTON
-         FIXED SNAPSHOT SOURCE
-      ------------------------- */}
+    {/* CONTROL BAR (BOTTOM) */}
+    <div
+      style={{
+        padding: 8,
+        borderTop: "1px solid #ddd",
+        display: "flex",
+        justifyContent: "flex-end",
+        gap: 8,
+        background: "#fafafa"
+      }}
+    >
       <button
         onClick={() => {
-          // ✅ FIX #2: guard FIRST
           if (!editorRef.current) return;
 
-          // take snapshot from correct store
           const snap = editorRef.current.store.getStoreSnapshot();
-
-          console.log("TLDRAW SAVE SNAPSHOT:", snap.store);
-
           onChange(snap);
         }}
       >
         Save Drawing
       </button>
     </div>
-  );
+  </div>
+);
 }
-
-
 
 /* -------------------------
    APP
@@ -166,24 +185,51 @@ export default function App() {
 
   const step = operation.steps[activeStep];
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   /* -------------------------
-     UPDATE TEXT BLOCK
+     STEP UPDATE HELPERS
+  ------------------------- */
+  const updateStep = (stepId: string, updater: (s: Step) => Step) => {
+    setOperation(prev => ({
+      ...prev,
+      steps: prev.steps.map(s =>
+        s.id === stepId ? updater(s) : s
+      )
+    }));
+  };
+
+  const deleteStep = (stepId: string) => {
+    setOperation(prev => {
+      const updated = prev.steps.filter(s => s.id !== stepId);
+
+      return {
+        ...prev,
+        steps: updated
+      };
+    });
+
+    setActiveStep(0);
+  };
+
+  /* -------------------------
+     BLOCK UPDATE
   ------------------------- */
   const updateText = (blockId: string, value: string) => {
-    setOperation((prev) => ({
-      ...prev,
-      steps: prev.steps.map((s) =>
-        s.id === step.id
-          ? {
-              ...s,
-              blocks: s.blocks.map((b) =>
-                b.id === blockId && b.type === "text"
-                  ? { ...b, content: value }
-                  : b
-              )
-            }
-          : s
+    updateStep(step.id, (s) => ({
+      ...s,
+      blocks: s.blocks.map(b =>
+        b.id === blockId && b.type === "text"
+          ? { ...b, content: value }
+          : b
       )
+    }));
+  };
+
+  const deleteBlock = (blockId: string) => {
+    updateStep(step.id, (s) => ({
+      ...s,
+      blocks: s.blocks.filter(b => b.id !== blockId)
     }));
   };
 
@@ -205,117 +251,171 @@ export default function App() {
   };
 
   /* -------------------------
-     IMPORT
-  ------------------------- */
-  const importJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = (e) => {
-      try {
-        const parsed = JSON.parse(e.target?.result as string);
-        setOperation(parsed);   // ✅ FIXED
-        setActiveStep(0);
-      } catch {
-        alert("Invalid JSON file");
-      }
-    };
-
-    reader.readAsText(file);
-  };
-
-  /* -------------------------
      UI
   ------------------------- */
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
 
       {/* TOP BAR */}
-      <div style={{ height: 50, display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", gap: 10, padding: 10 }}>
         <strong>Operation Editor</strong>
+
         <button onClick={exportJSON}>Export</button>
-        <input type="file" onChange={importJSON} />
+
+        <button onClick={() => setOperation(prev => ({
+          ...prev,
+          steps: [...prev.steps, createStep()]
+        }))}>
+          + Add Step
+        </button>
+
+        <button
+  onClick={() => fileInputRef.current?.click()}
+>
+  Import Instructions
+</button>
+
+  <input
+    ref={fileInputRef}
+    type="file"
+    accept="application/json"
+    style={{ display: "none" }}
+    onChange={(event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target?.result as string);
+
+          // basic validation guard (important)
+          if (!parsed.steps || !Array.isArray(parsed.steps)) {
+            alert("Invalid instruction file");
+            return;
+          }
+
+          setOperation(parsed);
+          setActiveStep(0);
+        } catch {
+          alert("Invalid JSON file");
+        }
+      };
+
+      reader.readAsText(file);
+    }}
+  />
       </div>
 
       <div style={{ display: "flex", flex: 1 }}>
 
         {/* STEPS */}
-        <div style={{ width: 250, borderRight: "1px solid #ccc" }}>
+        <div style={{ width: 280, borderRight: "1px solid #ccc" }}>
           {operation.steps.map((s, i) => (
             <div
               key={s.id}
-              onClick={() => setActiveStep(i)}
               style={{
                 padding: 10,
-                cursor: "pointer",
-                background: i === activeStep ? "#eee" : "white"
+                background: i === activeStep ? "#eee" : "white",
+                cursor: "pointer"
               }}
             >
               <input
                 value={s.title}
-                onChange={(e) => {
-                  const value = e.target.value;
-
-                  setOperation((prev) => ({
-                    ...prev,
-                    steps: prev.steps.map((st) =>
-                      st.id === s.id
-                        ? { ...st, title: value }
-                        : st
-                    )
-                  }));
-                }}
+                onChange={(e) =>
+                  updateStep(s.id, step => ({
+                    ...step,
+                    title: e.target.value
+                  }))
+                }
                 style={{ width: "100%", fontWeight: "bold" }}
+                onClick={() => setActiveStep(i)}
               />
+
+              <button onClick={() => deleteStep(s.id)} style={{ color: "red" }}>
+                Delete Step
+              </button>
             </div>
           ))}
         </div>
 
-        {/* STEP CONTENT */}
+        {/* CONTENT */}
         <div style={{ flex: 1, padding: 20 }}>
+
           <h2>{step.title}</h2>
 
-          {step.blocks.map((block) => {
-            if (block.type === "text") {
-              return (
-                <TextBlock
-                  key={block.id}
-                  content={block.content}
-                  onChange={(v) => updateText(block.id, v)}
-                />
-              );
-            }
+          {/* Add block buttons */}
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={() =>
+                updateStep(step.id, s => ({
+                  ...s,
+                  blocks: [...s.blocks, createBlock("text")]
+                }))
+              }
+            >
+              + Text
+            </button>
 
-            if (block.type === "tldraw") {
-              return (
-                <TldrawBlock
-                  key={block.id}
-                  snapshot={block.snapshot}
-                  onChange={(snapshot) => {
-                    setOperation((prev) => ({
-                      ...prev,
-                      steps: prev.steps.map((s) =>
-                        s.id === step.id
-                          ? {
-                              ...s,
-                              blocks: s.blocks.map((b) =>
-                                b.id === block.id
-                                  ? { ...b, snapshot }
-                                  : b
-                              )
-                            }
-                          : s
-                      )
-                    }));
-                  }}
-                />
-              );
-            }
+            <button
+              onClick={() =>
+                updateStep(step.id, s => ({
+                  ...s,
+                  blocks: [...s.blocks, createBlock("tldraw")]
+                }))
+              }
+            >
+              + Drawing
+            </button>
+          </div>
 
-            return null;
-          })}
+          {/* BLOCKS */}
+          {step.blocks.map(block => (
+            <div key={block.id} style={{ marginBottom: 15 }}>
+
+              {block.type === "text" && (
+                <>
+                  <BlockWrapper>
+                    <TextBlock
+                      content={block.content}
+                      onChange={(v) => updateText(block.id, v)}
+                    />
+
+                    <button onClick={() => deleteBlock(block.id)} style={{ color: "red" }}>
+                      Remove
+                    </button>
+                  </BlockWrapper>
+                </>
+              )}
+
+              {block.type === "tldraw" && (
+                <>
+                  <BlockWrapper>
+                    <TldrawBlock
+                      snapshot={block.snapshot}
+                      onChange={(snapshot) =>
+                        updateStep(step.id, s => ({
+                          ...s,
+                          blocks: s.blocks.map(b =>
+                            b.id === block.id ? { ...b, snapshot } : b
+                          )
+                        }))
+                      }
+                    />
+
+                    <div style={{ marginTop: 8 }}>
+                      <button onClick={() => deleteBlock(block.id)} style={{ color: "red" }}>
+                        Remove
+                      </button>
+                    </div>
+                  </BlockWrapper>
+                </>
+              )}
+
+            </div>
+          ))}
+
         </div>
       </div>
     </div>
