@@ -9,32 +9,76 @@ type Block =
   | { id: string; type: "text"; content: string }
   | { id: string; type: "tldraw"; snapshot?: any };
 
-type Page = {
+type Step = {
   id: string;
   title: string;
   blocks: Block[];
+
+  // future-proof metadata (important for manufacturing use case)
+  meta?: {
+    stepNumber?: number;
+    durationMinutes?: number;
+    role?: string;
+  };
+};
+
+type Operation = {
+  id: string;
+  name: string;
+  steps: Step[];
 };
 
 /* -------------------------
    INITIAL DATA
 ------------------------- */
-const initialData: Page[] = [
-  {
-    id: "p1",
-    title: "Step 1 - Prep",
-    blocks: [
-      { id: "b1", type: "text", content: "Verify all parts are available." }
-    ]
-  },
-  {
-    id: "p2",
-    title: "Step 2 - Install",
-    blocks: [
-      { id: "b1", type: "text", content: "Place bracket into position." },
-      { id: "b2", type: "tldraw" }
-    ]
-  }
-];
+const initialData: Operation = {
+  id: "op1",
+  name: "Sample Operation",
+  steps: [
+    {
+      id: "s1",
+      title: "Step 1 - Prep",
+      blocks: [
+        { id: "b1", type: "text", content: "Verify all parts are available." }
+      ]
+    },
+    {
+      id: "s2",
+      title: "Step 2 - Install",
+      blocks: [
+        { id: "b1", type: "text", content: "Place bracket into position." },
+        { id: "b2", type: "tldraw" }
+      ]
+    }
+  ]
+};
+
+/* -------------------------
+   TITLE
+------------------------- */
+function PageTitle({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        fontSize: 20,
+        fontWeight: "bold",
+        width: "100%",
+        padding: 6,
+        marginBottom: 10,
+        border: "1px solid #ccc",
+        borderRadius: 4
+      }}
+    />
+  );
+}
 
 /* -------------------------
    TEXT BLOCK
@@ -111,45 +155,43 @@ function TldrawBlock({
   );
 }
 
+
+
 /* -------------------------
    APP
 ------------------------- */
 export default function App() {
-  const [pages, setPages] = useState<Page[]>(initialData);
+  const [operation, setOperation] = useState<Operation>(initialData);
+  const [activeStep, setActiveStep] = useState(0);
 
-  // (optional improvement but not required)
-  const [activePage, setActivePage] = useState(0);
-
-  const page = pages[activePage];
+  const step = operation.steps[activeStep];
 
   /* -------------------------
      UPDATE TEXT BLOCK
   ------------------------- */
   const updateText = (blockId: string, value: string) => {
-    setPages((prev) =>
-      prev.map((p) => {
-        // SAFE: using current page id still OK for this simple app
-        if (p.id !== page.id) return p;
-
-        return {
-          ...p,
-          blocks: p.blocks.map((b) =>
-            b.id === blockId && b.type === "text"
-              ? { ...b, content: value }
-              : b
-          )
-        };
-      })
-    );
+    setOperation((prev) => ({
+      ...prev,
+      steps: prev.steps.map((s) =>
+        s.id === step.id
+          ? {
+              ...s,
+              blocks: s.blocks.map((b) =>
+                b.id === blockId && b.type === "text"
+                  ? { ...b, content: value }
+                  : b
+              )
+            }
+          : s
+      )
+    }));
   };
 
   /* -------------------------
-     EXPORT JSON
-     (this is now correct because state is correct)
+     EXPORT
   ------------------------- */
   const exportJSON = () => {
-    const dataStr = JSON.stringify(pages, null, 2);
-
+    const dataStr = JSON.stringify(operation, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
 
     const url = URL.createObjectURL(blob);
@@ -163,7 +205,7 @@ export default function App() {
   };
 
   /* -------------------------
-     IMPORT JSON
+     IMPORT
   ------------------------- */
   const importJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -174,8 +216,8 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const parsed = JSON.parse(e.target?.result as string);
-        setPages(parsed);
-        setActivePage(0);
+        setOperation(parsed);   // ✅ FIXED
+        setActiveStep(0);
       } catch {
         alert("Invalid JSON file");
       }
@@ -189,53 +231,53 @@ export default function App() {
   ------------------------- */
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      
+
       {/* TOP BAR */}
-      <div
-        style={{
-          height: 50,
-          borderBottom: "1px solid #ccc",
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          gap: 10,
-          background: "#fafafa"
-        }}
-      >
+      <div style={{ height: 50, display: "flex", alignItems: "center", gap: 10 }}>
         <strong>Operation Editor</strong>
-
-        <button onClick={exportJSON}>Export Operation</button>
-
-        <label>
-          <input type="file" accept="application/json" onChange={importJSON} />
-        </label>
+        <button onClick={exportJSON}>Export</button>
+        <input type="file" onChange={importJSON} />
       </div>
 
-      {/* MAIN BODY */}
       <div style={{ display: "flex", flex: 1 }}>
-        
-        {/* PAGE LIST */}
+
+        {/* STEPS */}
         <div style={{ width: 250, borderRight: "1px solid #ccc" }}>
-          {pages.map((p, i) => (
+          {operation.steps.map((s, i) => (
             <div
-              key={p.id}
-              onClick={() => setActivePage(i)}
+              key={s.id}
+              onClick={() => setActiveStep(i)}
               style={{
                 padding: 10,
                 cursor: "pointer",
-                background: i === activePage ? "#eee" : "white"
+                background: i === activeStep ? "#eee" : "white"
               }}
             >
-              {p.title}
+              <input
+                value={s.title}
+                onChange={(e) => {
+                  const value = e.target.value;
+
+                  setOperation((prev) => ({
+                    ...prev,
+                    steps: prev.steps.map((st) =>
+                      st.id === s.id
+                        ? { ...st, title: value }
+                        : st
+                    )
+                  }));
+                }}
+                style={{ width: "100%", fontWeight: "bold" }}
+              />
             </div>
           ))}
         </div>
 
-        {/* PAGE CONTENT */}
-        <div style={{ flex: 1, padding: 20, overflow: "auto" }}>
-          <h2>{page.title}</h2>
+        {/* STEP CONTENT */}
+        <div style={{ flex: 1, padding: 20 }}>
+          <h2>{step.title}</h2>
 
-          {page.blocks.map((block) => {
+          {step.blocks.map((block) => {
             if (block.type === "text") {
               return (
                 <TextBlock
@@ -252,23 +294,21 @@ export default function App() {
                   key={block.id}
                   snapshot={block.snapshot}
                   onChange={(snapshot) => {
-                    // IMPORTANT FIX CONTEXT:
-                    // now state is always updated correctly per page
-
-                    setPages((prev) =>
-                      prev.map((p) => {
-                        if (p.id !== page.id) return p;
-
-                        return {
-                          ...p,
-                          blocks: p.blocks.map((b) =>
-                            b.id === block.id
-                              ? { ...b, snapshot }
-                              : b
-                          )
-                        };
-                      })
-                    );
+                    setOperation((prev) => ({
+                      ...prev,
+                      steps: prev.steps.map((s) =>
+                        s.id === step.id
+                          ? {
+                              ...s,
+                              blocks: s.blocks.map((b) =>
+                                b.id === block.id
+                                  ? { ...b, snapshot }
+                                  : b
+                              )
+                            }
+                          : s
+                      )
+                    }));
                   }}
                 />
               );
