@@ -5,9 +5,15 @@ import "tldraw/tldraw.css";
 /* -------------------------
    TYPES
 ------------------------- */
+
 type Block =
   | { id: string; type: "text"; content: string }
-  | { id: string; type: "tldraw"; snapshot?: any };
+  | { id: string; type: "tldraw"; snapshot?: any }
+  | {
+      id: string
+      type: "table"
+      rows: string[][]
+    };
 
 type Step = {
   id: string;
@@ -39,10 +45,18 @@ const createBlock = (type: Block["type"]): Block => {
     };
   }
 
+  if (type === "tldraw") {
+    return {
+      id: crypto.randomUUID(),
+      type: "tldraw",
+      snapshot: undefined
+    };
+  }
+
   return {
     id: crypto.randomUUID(),
-    type: "tldraw",
-    snapshot: undefined
+    type: "table",
+    rows: [["", ""]]
   };
 };
 
@@ -82,7 +96,8 @@ function BlockWrapper({ children }: { children: React.ReactNode }) {
         border: "1px solid #eee",
         padding: 10,
         marginBottom: 12,
-        borderRadius: 6
+        borderRadius: 6,
+        background: "white"
       }}
     >
       {children}
@@ -174,6 +189,60 @@ function TldrawBlock({
     </div>
   </div>
 );
+}
+
+/* -------------------------
+   Table BLOCK
+------------------------- */
+function TableBlock({
+  rows,
+  onChange
+}: {
+  rows: string[][]
+  onChange: (rows: string[][]) => void
+}) {
+  const updateCell = (r: number, c: number, value: string) => {
+    const copy = rows.map(row => [...row])
+    copy[r][c] = value
+    onChange(copy)
+  }
+
+  const addRow = () => {
+    onChange([...rows, new Array(rows[0]?.length || 2).fill("")])
+  }
+
+  const addCol = () => {
+    onChange(rows.map(row => [...row, ""]))
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <tbody>
+          {rows.map((row, rIdx) => (
+            <tr key={rIdx}>
+              {row.map((cell, cIdx) => (
+                <td key={cIdx} style={{ border: "1px solid #ccc" }}>
+                  <input
+                    value={cell}
+                    onChange={(e) =>
+                      updateCell(rIdx, cIdx, e.target.value)
+                    }
+                    style={{ width: "100%", padding: 4 }}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button onClick={addRow}>+ Row</button>
+        <button onClick={addCol}>+ Col</button>
+      </div>
+    </div>
+  )
 }
 
 /* -------------------------
@@ -362,6 +431,17 @@ export default function App() {
               onClick={() =>
                 updateStep(step.id, s => ({
                   ...s,
+                  blocks: [...s.blocks, createBlock("table")]
+                }))
+              }
+            >
+              + Table
+            </button>
+
+            <button
+              onClick={() =>
+                updateStep(step.id, s => ({
+                  ...s,
                   blocks: [...s.blocks, createBlock("tldraw")]
                 }))
               }
@@ -387,6 +467,33 @@ export default function App() {
                     </button>
                   </BlockWrapper>
                 </>
+              )}
+
+              {block.type === "table" && (
+                <BlockWrapper>
+                  <TableBlock
+                    rows={block.rows}
+                    onChange={(rows) =>
+                      updateStep(step.id, s => ({
+                        ...s,
+                        blocks: s.blocks.map(b =>
+                          b.id === block.id
+                            ? { ...b, rows }
+                            : b
+                        )
+                      }))
+                    }
+                  />
+
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      onClick={() => deleteBlock(block.id)}
+                      style={{ color: "red" }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </BlockWrapper>
               )}
 
               {block.type === "tldraw" && (
